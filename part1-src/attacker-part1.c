@@ -23,7 +23,7 @@
 static inline void call_kernel_part1(int kernel_fd, char *shared_memory, size_t offset) {
     spectre_lab_command local_cmd;
     local_cmd.kind = COMMAND_PART1;
-    local_cmd.arg1 = (uint64_t)shared_memory;
+    local_cmd.arg1 = (uintptr_t)shared_memory;
     local_cmd.arg2 = offset;
 
     write(kernel_fd, (void *)&local_cmd, sizeof(local_cmd));
@@ -41,7 +41,8 @@ int run_attacker(int kernel_fd, char *shared_memory) {
     size_t current_offset = 0;
 
     printf("Launching attacker\n");
-
+    clflush(shared_memory);
+    printf("Flushed!\n");
     for (current_offset = 0; current_offset < SHD_SPECTRE_LAB_SECRET_MAX_LEN; current_offset++) {
         char leaked_byte;
 

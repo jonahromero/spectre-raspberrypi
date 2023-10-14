@@ -3,9 +3,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>
-
-#include <emmintrin.h>
-#include <x86intrin.h>
+#include <assert.h>
 
 #include "labspectre.h"
 #include "labspectreipc.h"
@@ -28,8 +26,9 @@ static inline void mfence() {
  * Returns: None
  * Side Effects: Flushes a cache line from the cache
  */
-void clflush(void *addr) {
-    _mm_clflush(addr);
+void clflush(void *addr)
+{
+   asm volatile("mcr p15, 0, %0, c7, c6, 1"::"r"(addr));
 }
 
 /*
@@ -38,20 +37,28 @@ void clflush(void *addr) {
  *
  * Returns: Current value of TSC
  */
-uint64_t rdtsc(void) {
-    return __rdtsc();
+uint64_t rdtsc(void)
+{
+	uint32_t pmuseren, pmcountenset, counter;
+	asm volatile("mrc p15, 0, %0, c9, c14, 0":"=r"(pmuseren));
+	assert((pmuseren & 0x1) && "Must have perf monitor access");
+	asm volatile("mrc p15, 0, %0, c9, c12, 1":"=r"(pmcountenset));
+    assert((pmcountenset & 0x80000000) && "Counter must be enabled to count");
+	asm volatile("mrc p15, 0, %0, c9, c13, 0":"=r"(counter));
+	return counter;
 }
 
 /*
  * time_access
  * Returns the time to access an address
  */
-uint64_t time_access(void *addr) {
-    unsigned int tmp;
+uint64_t time_access(void *addr)
+{
+    volatile unsigned int temp;
     uint64_t time1, time2;
-    time1 = __rdtscp(&tmp);
-    tmp = *(unsigned int *)addr;
-    time2 = __rdtscp(&tmp);
+    time1 = rdtsc();
+    temp = *(unsigned int *)addr;
+    time2 = rdtsc();
     return time2 - time1;
 }
 

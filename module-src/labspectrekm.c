@@ -30,10 +30,15 @@ static volatile size_t __attribute__((aligned(32768))) secret_leak_limit_part2 =
 static volatile size_t __attribute__((aligned(32768))) secret_leak_limit_part3 = 4;
 
 static struct proc_dir_entry *spectre_lab_procfs_victim = NULL;
-static const struct file_operations  spectre_lab_victim_ops = {
-    .write = spectre_lab_victim_write,
-    .read = spectre_lab_victim_read,
+static const struct proc_ops spectre_lab_victim_ops = {
+    .proc_write = spectre_lab_victim_write,
+    .proc_read = spectre_lab_victim_read,
 };
+
+void flush(void* addr)
+{
+    asm volatile("mcr p15, 0, %0, c7, c6, 1"::"r"(addr));
+}
 
 /*
  * print_cmd
@@ -128,7 +133,9 @@ ssize_t spectre_lab_victim_write(struct file *file_in, const char __user *userbu
             // If the return value is negative, its an error, so don't try to unpin!
             if (retval > 0) {
                 // Unpin the pages that got pinned before exiting
-                put_user_pages(pages, retval);
+                for (i = 0; i < retval; i++) {
+                    put_page(pages[i]);
+                }
             }
 
             return num_bytes;
@@ -170,7 +177,7 @@ ssize_t spectre_lab_victim_write(struct file *file_in, const char __user *userbu
                 addr_to_leak = kernel_mapped_region[secret_data];
 
                 // Flush the limit variable to make this if statement take a long time to resolve
-                clflush(&secret_leak_limit_part2);
+                flush(&secret_leak_limit_part2);
                 if (user_cmd.arg2 < secret_leak_limit_part2) {
                     // Perform the speculative leak
                     tmp = *addr_to_leak;
@@ -194,7 +201,9 @@ ssize_t spectre_lab_victim_write(struct file *file_in, const char __user *userbu
         }
 
         // Unpin to ensure refcounts are valid
-        put_user_pages(pages, SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES);
+        for (i = 0; i < SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES; i++) {
+            put_page(pages[i]);
+        }
 
         // Success!
         return num_bytes;

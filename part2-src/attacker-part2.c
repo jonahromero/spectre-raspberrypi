@@ -23,7 +23,7 @@
 static inline void call_kernel_part2(int kernel_fd, char *shared_memory, size_t offset) {
     spectre_lab_command local_cmd;
     local_cmd.kind = COMMAND_PART2;
-    local_cmd.arg1 = (uint64_t)shared_memory;
+    local_cmd.arg1 = (uintptr_t)shared_memory;
     local_cmd.arg2 = offset;
 
     write(kernel_fd, (void *)&local_cmd, sizeof(local_cmd));

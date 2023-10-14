@@ -49,10 +49,10 @@ typedef struct spectre_lab_command_t {
 	spectre_lab_command_kind kind;
 
 	// Usually this is the user virtual address of the shared memory region
-	uint64_t arg1;
+	uintptr_t arg1;
 
 	// Usually this is the offset into the secret to access
-	uint64_t arg2;
+	uintptr_t arg2;
 } spectre_lab_command;
 
 #endif // SHD_SPECTRE_LAB_IPC_H
