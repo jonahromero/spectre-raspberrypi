@@ -39,11 +39,11 @@ static inline void call_kernel_part1(int kernel_fd, char *shared_memory, size_t 
 int run_attacker(int kernel_fd, char *shared_memory) {
     char leaked_str[SHD_SPECTRE_LAB_SECRET_MAX_LEN];
     size_t current_offset = 0;
-
+    pm_enable_cycle_count();
     printf("Launching attacker\n");
-    clflush(shared_memory);
     printf("Flushed!\n");
-    for (current_offset = 0; current_offset < SHD_SPECTRE_LAB_SECRET_MAX_LEN; current_offset++) {
+    for (current_offset = 0; current_offset < SHD_SPECTRE_LAB_SECRET_MAX_LEN; current_offset++)
+    {
         char leaked_byte;
 
         // [Part 1]- Fill this in!

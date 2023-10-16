@@ -27,21 +27,35 @@
  * Returns: None
  * Side Effects: Flushes a cache line from the cache
  */
-void clflush(void *addr);
+void flush_address(void *addr);
 
 /*
- * rdtsc
- * Reads the current timestamp counter
+ * pm_cycle_count
+ * Reads the current performance monitor cycle count through syscall
  *
- * Returns: Current value of TSC
+ * Returns: Current value of PM cycle count
  */
-uint64_t rdtsc(void);
+uint32_t pm_cycle_count(void);
+
+/*
+ * pm_quick_cycle_count
+ * Reads the PM cycle count from user space
+ *
+ * Returns: Current value of PM cycle count
+*/
+uint32_t pm_quick_cycle_count();
+
+/*
+ * pm_enable_cycle_count
+ * Enables the performance monitor cycle count
+*/
+void pm_enable_cycle_count(void);
 
 /*
  * time_access
  * Returns the time to access an address
  */
-uint64_t time_access(void *addr);
+uint32_t time_access(void *addr);
 
 /*
  * init_shared_memory
