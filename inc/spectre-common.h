@@ -1,7 +1,7 @@
 
 #ifndef COMMON_SPECTRE
 #define COMMON_SPECTRE
-
+#include "labspectre.h"
 
 #define REPEAT(x) for(int repeat_idx_##x=0; repeat_idx_##x < x; repeat_idx_##x++)
 #define NUM_SAMPLES 2000
@@ -10,7 +10,7 @@
 #define L3_SIZE 6291456
 
 // Basic Helpers:
-inline char* allocate_huge_page(size_t page_size){
+inline char* allocate_huge_page(size_t page_size) {
   void *buf= mmap(NULL, page_size, PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB, -1, 0);
 
   if (buf == (void*) - 1) {
@@ -23,7 +23,7 @@ inline char* allocate_huge_page(size_t page_size){
   // so later access will not suffer from such overhead.
   *((char *)buf) = 1; // dummy write to trigger page allocation
   for(int i = 0; i < page_size / 64; i++){
-      *((char*)buf + i * 64) = 1;
+        *((char*)buf + i * 64) = 1;
   }
   return (char*)buf;
 }
@@ -55,33 +55,54 @@ typedef enum {
         L1, L2, L3, DRAM
 } MemoryLevel;
 
+size_t calculate_bytes_in_cache(CacheSize size)
+{
+        return size.line_size * size.sets * size.associativity; 
+}
+
+inline void evict_all_cache()
+{
+        const size_t L3_SIZE = calculate_bytes_in_cache(get_cache_info(2, 1));
+        char* eviction_buffer = malloc(L3_SIZE * 2);
+        for (size_t i = 0; i < L3_SIZE * 2; i++)
+        {
+                eviction_buffer[i] = 'a';
+        }
+}
+
 inline CacheStats record_cache_stats()
 {
-        uint64_t dram_samples[NUM_SAMPLES] = {}, l1_samples[NUM_SAMPLES] = {}, l2_samples[NUM_SAMPLES] = {}, l3_samples[NUM_SAMPLES] = {};
+        const size_t L1_SIZE = calculate_bytes_in_cache(get_cache_info(0, 1));
+        const size_t L2_SIZE = calculate_bytes_in_cache(get_cache_info(1, 1));
+        const size_t L3_SIZE = calculate_bytes_in_cache(get_cache_info(2, 1));
+        uint32_t dram_samples[NUM_SAMPLES] = {}, 
+                 l1_samples[NUM_SAMPLES] = {}, 
+                 l2_samples[NUM_SAMPLES] = {}, 
+                 l3_samples[NUM_SAMPLES] = {};
         char* eviction_buffer = malloc(2* L3_SIZE * sizeof(char));
         char* line_buffer = malloc(64 * sizeof(char));
         // l1 accesses
-        for(int i = 0; i < NUM_SAMPLES; i++){
+        for(int i = 0; i < NUM_SAMPLES; i++) {
                 line_buffer[0] = 'a';
-                l1_samples[i] = measure_one_block_access_time((uint64_t)(void*)line_buffer);
+                l1_samples[i] = time_access(line_buffer);
         }
         // l2 accesses
         for(int i = 0; i < NUM_SAMPLES; i++) {
                 line_buffer[0] = 'a';
                 REPEAT(10) for(int j=0; j<(2*L1_SIZE)/64; j++) eviction_buffer[j*64] = 'a';
-                l2_samples[i] = measure_one_block_access_time((uint64_t)(void*)line_buffer);
+                l2_samples[i] = time_access(line_buffer);
         }
         // l3 accesses
         for(int i = 0; i < NUM_SAMPLES; i++){
-                clflush(line_buffer);
+                flush_address(line_buffer);
                 line_buffer[0] = 'a';
                 REPEAT(3) for(int j=0;j<(2*L2_SIZE)/64;j++) eviction_buffer[j*64] = 'a';
-                l3_samples[i] = measure_one_block_access_time((uint64_t)(void*)line_buffer);
+                l3_samples[i] = time_access(line_buffer);
         }
         // dram access
         for(int i = 0; i < NUM_SAMPLES; i++) {
-                clflush(line_buffer);
-                dram_samples[i] = measure_one_block_access_time((uint64_t)(void*)line_buffer);
+                flush_address(line_buffer);
+                dram_samples[i] = time_access(line_buffer);
         }
         free(line_buffer);
         free(eviction_buffer);

@@ -22,43 +22,6 @@ static inline void mfence() {
 }
 
 /*
- * pm_test_cycle_count
- * Debug function that tests whether or not we can read performance counter
- * from user space.
- *
- * Returns: cycle count
-*/
-static bool pm_test_cycle_count()
-{
-    uint32_t pmuseren, pmcountenset, counter;
-    asm volatile("mrc p15, 0, %0, c9, c14, 0":"=r"(pmuseren));
-    if(pmuseren & 0x1) {
-        fprintf(stderr, "PM Cycle Count is not enabled for user");
-        return false;
-    }
-    asm volatile("mrc p15, 0, %0, c9, c12, 1":"=r"(pmcountenset));
-    if (pmcountenset & 0x80000000) {
-        fprintf(stderr, "Counter must be enabled to count");
-        return false;
-    }
-    asm volatile("mrc p15, 0, %0, c9, c13, 0":"=r"(counter));
-    return true;
-}
-
-/*
- * pm_quick_cycle_count
- * Reads the PM cycle count from user space
- *
- * Returns: cycle count
-*/
-uint32_t pm_quick_cycle_count()
-{
-    uint32_t counter;
-    asm volatile("mrc p15, 0, %0, c9, c13, 0":"=r"(counter));
-    return counter;
-}
-
-/*
  * pm_enable_cycle_count
  * Enables the arm performance monitor
  *
@@ -78,20 +41,40 @@ void pm_enable_cycle_count() {
     }
 }
 
-
 /*
- * pm_cycle_count
- * Reads the current performance monitor cycle count
- * utilizing syscall: sys_pm_cycle_count
+ * pm_quick_cycle_count
+ * Reads the PM cycle count from user space
  *
  * Returns: cycle count
- */
-uint32_t pm_cycle_count()
+*/
+uint32_t pm_quick_cycle_count()
 {
-    uint32_t retval;
-    long rc = syscall(452, &retval);
-    //assert(rc == 0 && "Check sys_pm_cycle_count is implemented");
-    return retval;
+    uint32_t counter;
+    asm volatile("mrc p15, 0, %0, c9, c13, 0":"=r"(counter));
+    return counter;
+}
+
+/*
+ * pm_test_cycle_count
+ * Debug function that tests whether or not we can read performance counter
+ * from user space.
+ *
+ * Returns: cycle count
+*/
+static bool pm_test_cycle_count() {
+    uint32_t pmuseren, pmcountenset, counter;
+    asm volatile("mrc p15, 0, %0, c9, c14, 0":"=r"(pmuseren));
+    if(pmuseren & 0x1) {
+        fprintf(stderr, "PM Cycle Count is not enabled for user");
+        return false;
+    }
+    asm volatile("mrc p15, 0, %0, c9, c12, 1":"=r"(pmcountenset));
+    if (pmcountenset & 0x80000000) {
+        fprintf(stderr, "Counter must be enabled to count");
+        return false;
+    }
+    asm volatile("mrc p15, 0, %0, c9, c13, 0":"=r"(counter));
+    return true;
 }
 
 /*
@@ -111,6 +94,42 @@ void flush_address(void* ptr)
     assert(rc == 0 && "Check sys_flush_address is implemented");
 }
 
+void flush_address_range(void* addr, size_t size) {
+    syscall(454, addr, size);
+    assert(rc == 0 && "Check sys_flush_address_range is implemented");
+}
+
+/* get_cache_info + CacheSize
+ * Allows user to query the cache dimensions
+ *
+ * Arguments:
+ *  - cache_id: a cache id 1-7
+ *  - is_data_cache: whether or not the specified cache
+ *    is a data or an instruction cache
+ * 
+ * Returns: A struct containing various size information
+*/
+CacheSize get_cache_info(size_t cache_id, int is_data_cache) {
+    // Reference CCSIDR on ARM processors for more detailed description:
+    // bits 0-2: line size
+    // bits 12-3: associativity
+    // bits 27-13: number of sets
+    uint32_t cache_size;
+    long rc = syscall(455, cache_id, is_data_cache, &cache_size);
+    if (rc != 0) {
+        fprintf(stderr, "Unable to retrieve cache information");
+        if (errno == ENOSYS) {
+            fprintf(stderr, "System call number does not exist.");
+        }
+        fprintf(stderr, "\n");
+    }
+    return (CacheSize) {
+        .line_size     = 1 << (((cache_size >> 0) & ((uint32_t)(0x1 << 3) - 1)) + 2),
+        .associativity =      ((cache_size >> 3) & ((uint32_t)(0x1 << 10) - 1)) + 1,
+        .sets          =      ((cache_size >> 13) & ((uint32_t)(0x1 << 15) - 1)) + 1,
+    };
+}
+
 /*
  * time_access
  * Returns the time to access an address
@@ -120,7 +139,9 @@ uint32_t time_access(void *addr)
     volatile unsigned int temp;
     uint32_t time1, time2;
     time1 = pm_quick_cycle_count();
+    mfence();
     temp = *(unsigned int *)addr;
+    mfence();
     time2 = pm_quick_cycle_count();
     return time2 - time1;
 }
