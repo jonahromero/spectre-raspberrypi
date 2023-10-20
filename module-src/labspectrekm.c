@@ -40,6 +40,34 @@ void flush(void* addr)
     asm volatile("mcr p15, 0, %0, c7, c6, 1"::"r"(addr));
 }
 
+void print_cache_info(void)
+{
+    uint32_t cache_level_id, cache_id;
+    asm volatile("mrc p15, 1, %0, c0, c0, 1":"=r"(cache_level_id));
+    for (int i = 0; i < 7; i++) {
+        cache_id = cache_level_id & 0x7;
+        printk(KERN_INFO "cache #%d:\n", i);
+        switch (cache_id)
+        {
+        case 0:
+            printk(KERN_INFO "No cache"); break;
+        case 1:
+            printk(KERN_INFO "Instruction cache only"); break;
+        case 2:
+            printk(KERN_INFO "Data cache only"); break;
+        case 3:
+            printk(KERN_INFO "Seperate instruction and data caches"); break;
+        case 4:
+             printk(KERN_INFO "Unified cache"); break;
+        default:
+            printk(KERN_INFO "Reserved/Unknown"); break;
+        }
+        printk(KERN_INFO "\n");
+        cache_level_id >>= 3;
+    }
+
+}
+
 /*
  * print_cmd
  * Prints a nicely formatted command to stdout
@@ -65,6 +93,7 @@ void print_cmd(spectre_lab_command *cmd) {
  */
 int spectre_lab_init(void) {
     printk(SHD_PRINT_INFO "SHD Spectre KM Loaded\n");
+    print_cache_info();
     spectre_lab_procfs_victim = proc_create(SHD_PROCFS_NAME, 0, NULL, &spectre_lab_victim_ops);
     return 0;
 }

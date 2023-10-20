@@ -1,6 +1,5 @@
 #ifndef SHD_SPECTRE_LAB_IPC_H
 #define SHD_SPECTRE_LAB_IPC_H
-
 /******************************
  * SHD Spectre Lab Parameters *
  ******************************/
@@ -49,10 +48,10 @@ typedef struct spectre_lab_command_t {
 	spectre_lab_command_kind kind;
 
 	// Usually this is the user virtual address of the shared memory region
-	uintptr_t arg1;
+	uint32_t arg1;
 
 	// Usually this is the offset into the secret to access
-	uintptr_t arg2;
+	uint32_t arg2;
 } spectre_lab_command;
 
 #endif // SHD_SPECTRE_LAB_IPC_H

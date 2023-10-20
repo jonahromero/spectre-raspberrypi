@@ -4,13 +4,11 @@
 #include "labspectre.h"
 
 #define REPEAT(x) for(int repeat_idx_##x=0; repeat_idx_##x < x; repeat_idx_##x++)
-#define NUM_SAMPLES 2000
-#define L1_SIZE 32768
-#define L2_SIZE 262144
-#define L3_SIZE 6291456
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define NUM_SAMPLES 900
 
 // Basic Helpers:
-inline char* allocate_huge_page(size_t page_size) {
+static char* allocate_huge_page(size_t page_size) {
   void *buf= mmap(NULL, page_size, PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB, -1, 0);
 
   if (buf == (void*) - 1) {
@@ -28,19 +26,20 @@ inline char* allocate_huge_page(size_t page_size) {
   return (char*)buf;
 }
 
-inline uint64_t print_buffer(uint64_t* arr, size_t size) {
+static void print_buffer(uint32_t* arr, size_t size) {
         printf("[");
-        for(size_t i=0;i<size - 1;i++) {
-                printf("%lu", arr[i]);
+        for(size_t i = 0; i < size - 1; i++) {
+                printf("%u", arr[i]);
                 if(size - 2 != i) printf(",");
         }
         printf("]\n");
 }
 
-inline uint64_t average(uint64_t* arr, size_t size)
+static uint32_t average(uint32_t* arr, size_t size)
 {
         uint64_t sum = 0;
-        for(int i=0; i<size - 1;i++) sum += arr[i];
+        for(int i = 0; i < size - 1; i++)
+            sum += arr[i];
         return sum / size;
 }
 
@@ -48,86 +47,103 @@ inline uint64_t average(uint64_t* arr, size_t size)
 
 typedef struct
 {
-        uint64_t l1, l2, l3, dram;
+        uint32_t l1, l2, dram;
 } CacheStats;
 
 typedef enum {
-        L1, L2, L3, DRAM
+        L1, L2, DRAM
 } MemoryLevel;
 
-size_t calculate_bytes_in_cache(CacheSize size)
+static size_t calculate_bytes_in_cache(CacheSize size)
 {
-        return size.line_size * size.sets * size.associativity; 
+        return size.line_size * size.sets * size.associativity * 4;
 }
 
-inline void evict_all_cache()
+static void evict_all_cache()
 {
-        const size_t L3_SIZE = calculate_bytes_in_cache(get_cache_info(2, 1));
-        char* eviction_buffer = malloc(L3_SIZE * 2);
-        for (size_t i = 0; i < L3_SIZE * 2; i++)
+        const size_t L2_SIZE = calculate_bytes_in_cache(get_cache_info(1, 0));
+        char* eviction_buffer = malloc(L2_SIZE * 4);
+        for (size_t i = 0; i < (L2_SIZE * 3) / 16; i++)
         {
-                eviction_buffer[i] = 'a';
+                eviction_buffer[i*16] = 'a';
         }
+        free(eviction_buffer);
 }
 
-inline CacheStats record_cache_stats()
+static CacheStats record_cache_stats()
 {
-        const size_t L1_SIZE = calculate_bytes_in_cache(get_cache_info(0, 1));
-        const size_t L2_SIZE = calculate_bytes_in_cache(get_cache_info(1, 1));
-        const size_t L3_SIZE = calculate_bytes_in_cache(get_cache_info(2, 1));
-        uint32_t dram_samples[NUM_SAMPLES] = {}, 
-                 l1_samples[NUM_SAMPLES] = {}, 
-                 l2_samples[NUM_SAMPLES] = {}, 
-                 l3_samples[NUM_SAMPLES] = {};
-        char* eviction_buffer = malloc(2* L3_SIZE * sizeof(char));
-        char* line_buffer = malloc(64 * sizeof(char));
+        const size_t L1_SIZE = calculate_bytes_in_cache(get_cache_info(0, 0));
+        const size_t L2_SIZE = calculate_bytes_in_cache(get_cache_info(1, 0));
+        printf("L1 Size:%lu\n", L1_SIZE);
+        printf("L2 Size:%lu\n", L2_SIZE);
+        // use clidr to determine number of caches that exist
+        for (int i = 0; i < 2; i++){
+            CacheSize size = get_cache_info(i, 0);
+            printf("Data Cache %d:\n", i);
+            printf("\tsets: %d\n", size.sets);;
+            printf("\tassociativity: %d\n", size.associativity);
+            printf("\tline size: %d\n\n", size.line_size);
+        }
+        fflush(stdout);
+
+        uint32_t dram_samples[NUM_SAMPLES] = {},
+                 l1_samples[NUM_SAMPLES] = {},
+                 l2_samples[NUM_SAMPLES] = {};
+        size_t largest_cache_size = max(L1_SIZE, L2_SIZE);
+        volatile char* eviction_buffer = malloc(2* largest_cache_size * sizeof(char));
+        char* line_buffer = malloc(16 * sizeof(char));
+
         // l1 accesses
         for(int i = 0; i < NUM_SAMPLES; i++) {
+                //REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
                 line_buffer[0] = 'a';
                 l1_samples[i] = time_access(line_buffer);
         }
         // l2 accesses
         for(int i = 0; i < NUM_SAMPLES; i++) {
                 line_buffer[0] = 'a';
-                REPEAT(10) for(int j=0; j<(2*L1_SIZE)/64; j++) eviction_buffer[j*64] = 'a';
+                REPEAT(10) for(int j=0; j<(2*L1_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
                 l2_samples[i] = time_access(line_buffer);
-        }
-        // l3 accesses
-        for(int i = 0; i < NUM_SAMPLES; i++){
-                flush_address(line_buffer);
-                line_buffer[0] = 'a';
-                REPEAT(3) for(int j=0;j<(2*L2_SIZE)/64;j++) eviction_buffer[j*64] = 'a';
-                l3_samples[i] = time_access(line_buffer);
         }
         // dram access
         for(int i = 0; i < NUM_SAMPLES; i++) {
-                flush_address(line_buffer);
+                //flush_address(line_buffer);
+                REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
                 dram_samples[i] = time_access(line_buffer);
         }
+        print_buffer(l1_samples, NUM_SAMPLES);
+        print_buffer(l2_samples, NUM_SAMPLES);
+        print_buffer(dram_samples, NUM_SAMPLES);
+
         free(line_buffer);
         free(eviction_buffer);
-        return (CacheStats){
+        CacheStats stats = (CacheStats){
                 average(l1_samples, NUM_SAMPLES),
                 average(l2_samples, NUM_SAMPLES),
-                average(l3_samples, NUM_SAMPLES),
                 average(dram_samples, NUM_SAMPLES)
         };
+
+        printf("L1 Average: %u\n", stats.l1);
+        printf("L2 Average: %u\n", stats.l2);
+        printf("DRAM Average: %u\n", stats.dram);
+        return stats;
 }
 
-inline MemoryLevel determine_memory_level(CacheStats stats, void* address)
+static MemoryLevel determine_memory_level(CacheStats stats, void* address)
 {
-        uint64_t access_time = time_access(address);
-        uint64_t l1_diff =   abs(access_time - stats.l1),
-                 l2_diff =   abs(access_time - stats.l2),
-                 l3_diff =   abs(access_time - stats.l3),
-                 dram_diff = abs(access_time - stats.dram);
-        if(l1_diff < l2_diff && l1_diff < l3_diff && l1_diff < dram_diff) return L1;
-        else if(l2_diff < l3_diff && l2_diff < dram_diff) return L2;
-        else if(l3_diff < dram_diff) return L3;
+        uint32_t access_time = time_access(address);
+        //printf("Time to acces:%u\n", access_time);
+#define UNSIGNED_ABS_DIFF(a, b) ((a) > (b) ? (a) - (b) : (b) - (a))
+        uint32_t l1_diff = UNSIGNED_ABS_DIFF(access_time, stats.l1),
+                 l2_diff = UNSIGNED_ABS_DIFF(access_time, stats.l2),
+                 dram_diff = UNSIGNED_ABS_DIFF(access_time, stats.dram);
+        //printf("l1_diff:%u, l2_diff:%u, dram_diff:%u", l1_diff, l2_diff, dram_diff);
+        if(l1_diff < l2_diff && l1_diff < dram_diff) return L1;
+        else if(l2_diff < dram_diff) return L2;
         else return DRAM;
 }
 
-inline void warmup()
+static void warmup()
 {
         const size_t page_size = 1 << 12;
         char* small_page = malloc(page_size * sizeof(char));

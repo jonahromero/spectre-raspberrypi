@@ -18,7 +18,10 @@
  * Adds a memory fence
  */
 static inline void mfence() {
-    asm volatile("mfence");
+    uint32_t undefined=0;
+    //asm volatile("mcr p15, 0, %0, c7, c10, 4"::"r"(undefined));
+    //asm volatile("mcr p15, 0, %0, c7, c10, 5"::"r"(undefined));
+    asm volatile("DMB");
 }
 
 /*
@@ -95,7 +98,7 @@ void flush_address(void* ptr)
 }
 
 void flush_address_range(void* addr, size_t size) {
-    syscall(454, addr, size);
+    long rc = syscall(454, addr, size);
     assert(rc == 0 && "Check sys_flush_address_range is implemented");
 }
 
@@ -136,6 +139,11 @@ CacheSize get_cache_info(size_t cache_id, int is_data_cache) {
  */
 uint32_t time_access(void *addr)
 {
+    uint32_t time;
+    long rc = syscall(456, addr, &time);
+    assert(rc != -1 && "no syscall");
+    return time;
+    /*
     volatile unsigned int temp;
     uint32_t time1, time2;
     time1 = pm_quick_cycle_count();
@@ -144,6 +152,7 @@ uint32_t time_access(void *addr)
     mfence();
     time2 = pm_quick_cycle_count();
     return time2 - time1;
+    */
 }
 
 /*

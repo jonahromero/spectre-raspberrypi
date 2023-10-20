@@ -29,10 +29,10 @@ all: $(TARGETS)
 clean:
 	rm -rf build $(TARGETS)
 
-build/%.o: src-common/%.s
-	@echo " AS    $<"
-	@mkdir -p build
-	@$(AS) -c $(ASFLAGS) $< -o $@
+#build/%.o: src-common/%.s
+#	@echo " AS    $<"
+#	@mkdir -p build
+#	@$(AS) -c $(ASFLAGS) $< -o $@
 
 build/%.o: src-common/%.c
 	@echo " CC    $<"
