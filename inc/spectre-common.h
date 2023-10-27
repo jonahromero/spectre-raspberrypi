@@ -90,7 +90,7 @@ static CacheStats record_cache_stats()
                  l1_samples[NUM_SAMPLES] = {},
                  l2_samples[NUM_SAMPLES] = {};
         size_t largest_cache_size = max(L1_SIZE, L2_SIZE);
-        volatile char* eviction_buffer = malloc(2* largest_cache_size * sizeof(char));
+        char* eviction_buffer = malloc(2* largest_cache_size * sizeof(char));
         char* line_buffer = malloc(16 * sizeof(char));
 
         // l1 accesses
@@ -108,7 +108,8 @@ static CacheStats record_cache_stats()
         // dram access
         for(int i = 0; i < NUM_SAMPLES; i++) {
                 //flush_address(line_buffer);
-                REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
+                __sync_synchronize();
+                //REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
                 dram_samples[i] = time_access(line_buffer);
         }
         print_buffer(l1_samples, NUM_SAMPLES);

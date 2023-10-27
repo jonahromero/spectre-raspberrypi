@@ -65,7 +65,11 @@ void print_cache_info(void)
         printk(KERN_INFO "\n");
         cache_level_id >>= 3;
     }
-
+    printk(KERN_INFO "Level of Unification Inner Shareable: %d", cache_level_id & 0x7);
+    cache_level_id >>= 3;
+    printk(KERN_INFO "Level of Coherence: %d", cache_level_id & 0x7);
+    cache_level_id >>= 3;
+    printk(KERN_INFO "Level of Unification Uniprocessor: %d\n", cache_level_id & 0x7);
 }
 
 /*
