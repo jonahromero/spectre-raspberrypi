@@ -5,13 +5,7 @@ obj-m += labspectrekm.o
 INCLUDES := \
 	-I$(PWD)/../inc
 
-# Some warnings we don't care about :)
-IGNORE_WARNINGS := \
-	-Wno-frame-larger-than \
-	-Wno-char-subscripts \
-	-Wno-unused-variable \
-
-EXTRA_CFLAGS += $(INCLUDES) $(IGNORE_WARNINGS)
+EXTRA_CFLAGS += $(INCLUDES)
 EXTRA_LDFLAGS += $(IGNORE_WARNINGS)
 
 all:

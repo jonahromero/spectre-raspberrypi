@@ -2,7 +2,7 @@ CC := gcc
 AS := as
 LD := ld
 
-OBJECTS_COMMON := main.o spectre_lab_helper.o
+OBJECTS_COMMON := main.o spectre_lab_helper.o spectre_solution.o
 
 OBJECTS_PART1 := $(OBJECTS_COMMON) attacker-part1.o
 TARGET_PART1  := part1

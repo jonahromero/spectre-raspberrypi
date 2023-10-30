@@ -4,15 +4,6 @@
  * Created by Joseph Ravichandran for Spring 2022
  * Updated for Spring 2023
  */
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/init.h>
-#include <linux/fs.h>
-#include <linux/proc_fs.h>
-#include <linux/uaccess.h>
-#include <linux/mm.h>
-#include <linux/highmem.h>
-
 #include "labspectrekm.h"
 #include "labspectreipc.h"
 
@@ -35,41 +26,112 @@ static const struct proc_ops spectre_lab_victim_ops = {
     .proc_read = spectre_lab_victim_read,
 };
 
+
+typedef struct {
+    size_t sets, associativity, line_size;
+} CacheSize;
+
+
 void flush(void* addr)
 {
-    asm volatile("mcr p15, 0, %0, c7, c6, 1"::"r"(addr));
+    asm volatile("dc civac, %0"::"r"(addr));
+}
+
+void enable_pm(void)
+{
+    uint64_t control_register;
+    uint64_t count_enable;
+    uint64_t user_enable;
+
+    // PM Control Register
+    asm volatile("mrs %0, PMCR_EL0":"=r"(control_register));
+    // bit 0: Affected counters are enabled by PMCNTENSET_EL0
+    control_register |= 0b1;
+    asm volatile("msr PMCR_EL0, %0"::"r"(control_register));
+
+    // PM Count Enable Set Register
+    asm volatile("mrs %0, PMCNTENSET_EL0":"=r"(count_enable));
+    // bit 31: Reads to pmccntr_el0 are enabled
+    count_enable |= 0x80000000;
+    asm volatile("msr PMCNTENSET_EL0, %0"::"r"(count_enable));
+
+    // PM User Enable Read Register
+    asm volatile("mrs %0, PMUSERENR_EL0":"=r"(user_enable));
+    // bit 0: Enables EL0 read/write access to PMU registers.
+    // bit 2: Cycle counter Read enable.
+    printk("Before Setting PMUSERENR_EL0:%#08x\n", user_enable);
+    user_enable |= 0b0101;
+    asm volatile("msr PMUSERENR_EL0, %0"::"r"(user_enable));
+    asm volatile("mrs %0, PMUSERENR_EL0":"=r"(user_enable));
+    printk("After Setting PMUSERENR_EL0:%#08x\n", user_enable);
+}
+
+
+static int select_cache(size_t cache_level, int is_data_cache)
+{
+    uint64_t cache_selection = 0;
+    if (cache_level > 7) return 1;
+    cache_selection |= ((uint64_t)cache_level << 1) | (uint64_t)(!is_data_cache);
+    asm volatile("msr CSSELR_EL1, %0"::"r"(cache_selection));
+    return 0;
+}
+
+CacheSize get_cache_info(size_t cache_level)
+{
+    uint64_t cache_size;
+    if(select_cache(cache_level, 1) != 0)
+    {
+        return (CacheSize){0,0,0};
+    }
+    asm volatile("mrs %0, CCSIDR_EL1":"=r"(cache_size));
+    // bits 0-2: line size
+    // bits 12-3: associativity
+    // bits 27-13: number of sets
+    return (CacheSize) {
+        .line_size     = (1 << (((cache_size >> 0) & ((uint64_t)(0x1 << 3) - 1)) + 2)) * 4,
+        .associativity =      ((cache_size >> 3) & ((uint64_t)(0x1 << 10) - 1)) + 1,
+        .sets          =      ((cache_size >> 13) & ((uint64_t)(0x1 << 15) - 1)) + 1,
+    };
 }
 
 void print_cache_info(void)
 {
     uint32_t cache_level_id, cache_id;
-    asm volatile("mrc p15, 1, %0, c0, c0, 1":"=r"(cache_level_id));
+    asm volatile("mrs %0, CLIDR_EL1" : "=r"(cache_level_id));
     for (int i = 0; i < 7; i++) {
         cache_id = cache_level_id & 0x7;
-        printk(KERN_INFO "cache #%d:\n", i);
+        printk(SHD_PRINT_INFO "cache #%d: ", i);
         switch (cache_id)
         {
         case 0:
-            printk(KERN_INFO "No cache"); break;
+            printk("No cache"); break;
         case 1:
-            printk(KERN_INFO "Instruction cache only"); break;
+            printk("Instruction cache only"); break;
         case 2:
-            printk(KERN_INFO "Data cache only"); break;
+            printk("Data cache only"); break;
         case 3:
-            printk(KERN_INFO "Seperate instruction and data caches"); break;
+            printk("Seperate instruction and data caches"); break;
         case 4:
-             printk(KERN_INFO "Unified cache"); break;
+             printk("Unified cache"); break;
         default:
-            printk(KERN_INFO "Reserved/Unknown"); break;
+            printk("Reserved/Unknown"); break;
         }
-        printk(KERN_INFO "\n");
+        if (cache_id >= 2 && cache_id <= 4)
+        {
+            CacheSize size = get_cache_info(i);
+            printk("Line Size: %ld\nSets: %lu\nAssociativity:%ld\nSize:%lu bytes",
+                size.line_size, size.sets, size.associativity, size.line_size * size.sets * size.associativity
+            );
+        }
+        printk("\n");
         cache_level_id >>= 3;
     }
-    printk(KERN_INFO "Level of Unification Inner Shareable: %d", cache_level_id & 0x7);
+
+    printk(SHD_PRINT_INFO "Level of Unification Inner Shareable: %d", cache_level_id & 0x7);
     cache_level_id >>= 3;
-    printk(KERN_INFO "Level of Coherence: %d", cache_level_id & 0x7);
+    printk(SHD_PRINT_INFO "Level of Coherence: %d", cache_level_id & 0x7);
     cache_level_id >>= 3;
-    printk(KERN_INFO "Level of Unification Uniprocessor: %d\n", cache_level_id & 0x7);
+    printk(SHD_PRINT_INFO "Level of Unification Uniprocessor: %d\n", cache_level_id & 0x7);
 }
 
 /*
@@ -97,6 +159,7 @@ void print_cmd(spectre_lab_command *cmd) {
  */
 int spectre_lab_init(void) {
     printk(SHD_PRINT_INFO "SHD Spectre KM Loaded\n");
+    enable_pm();
     print_cache_info();
     spectre_lab_procfs_victim = proc_create(SHD_PROCFS_NAME, 0, NULL, &spectre_lab_victim_ops);
     return 0;
@@ -130,7 +193,8 @@ ssize_t spectre_lab_victim_read(struct file *file_in, char __user *userbuf, size
  * Output: Number of bytes accepted by the module.
  * Side Effects: Will trigger a spectre bug based on the user_cmd.kind
  */
-ssize_t spectre_lab_victim_write(struct file *file_in, const char __user *userbuf, size_t num_bytes, loff_t *offset) {
+ssize_t spectre_lab_victim_write(struct file *file_in, const char __user *userbuf, size_t num_bytes, loff_t *offset)
+{
     spectre_lab_command user_cmd;
     struct page *pages[SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES];
     char *kernel_mapped_region[SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES];
