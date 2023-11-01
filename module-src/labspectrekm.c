@@ -6,6 +6,8 @@
  */
 #include "labspectrekm.h"
 #include "labspectreipc.h"
+#include <linux/kthread.h>
+#include <linux/sched.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Joseph Ravichandran <jravi@csail.mit.edu>");
@@ -66,6 +68,13 @@ void enable_pm(void)
     printk("After Setting PMUSERENR_EL0:%#08x\n", user_enable);
 }
 
+int enable_pm_thread_wrapper(void*) { enable_pm(); return 0; }
+
+void enable_pm_on_core(int core)
+{
+    struct task_struct* task = kthread_create_on_cpu(enable_pm_thread_wrapper, &core, core, "enable_pm_thread");
+    wake_up_process(task);
+}
 
 static int select_cache(size_t cache_level, int is_data_cache)
 {
@@ -160,7 +169,9 @@ void print_cmd(spectre_lab_command *cmd) {
  */
 int spectre_lab_init(void) {
     printk(SHD_PRINT_INFO "SHD Spectre KM Loaded\n");
-    enable_pm();
+    for (int i = 0; i < num_possible_cpus(); i++) {
+        enable_pm_on_core(i);
+    }
     print_cache_info();
     spectre_lab_procfs_victim = proc_create(SHD_PROCFS_NAME, 0, NULL, &spectre_lab_victim_ops);
     return 0;
