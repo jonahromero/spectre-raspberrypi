@@ -79,7 +79,7 @@ static int select_cache(size_t cache_level, int is_data_cache)
 CacheSize get_cache_info(size_t cache_level)
 {
     uint64_t cache_size;
-    if(select_cache(cache_level, 1) != 0)
+    if (select_cache(cache_level, 1) != 0)
     {
         return (CacheSize){0,0,0};
     }
@@ -98,7 +98,8 @@ void print_cache_info(void)
 {
     uint32_t cache_level_id, cache_id;
     asm volatile("mrs %0, CLIDR_EL1" : "=r"(cache_level_id));
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 7; i++)
+    {
         cache_id = cache_level_id & 0x7;
         printk(SHD_PRINT_INFO "cache #%d: ", i);
         switch (cache_id)

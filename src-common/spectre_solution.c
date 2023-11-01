@@ -4,19 +4,16 @@
 
 #define UNSIGNED_ABS_DIFF(a, b) ((a) > (b) ? (a) - (b) : (b) - (a))
 #define max(a, b) ((a) > (b) ? (a) : (b))
-#define NUM_SAMPLES 900
 #define HUGE_PAGE_SIZE (1 << 21)
-#define IS_ALIGNED(ptr, alignment) (((uint64_t)(ptr) & ((uint64_t)(alignment) - 1)) == 0)
-
 #define L1_SIZE (64*256*2)
 #define L2_SIZE (64*1024*16)
 
 // Helper functions:
 
-char* allocate_huge_page()
+char* allocate_2mb_huge_page()
 {
     fflush(stdout);
-    void* buf = mmap(NULL, (2 * 1024 * 1024), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+    void* buf = mmap(NULL, HUGE_PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
 
     if (buf == (void*) - 1) {
         perror("mmap() error\n");
@@ -33,41 +30,13 @@ char* allocate_huge_page()
     return (char*)buf;
 }
 
-const char* memory_level_to_str(MemoryLevel level)
-{
-    switch (level)
-    {
-        case L1: return "L1";
-        case L2: return "L2";
-        case DRAM: return "DRAM";
-        default: return "Unknown";
-    }
-}
-
-void print_buffer(uint32_t* arr, size_t size) {
-    printf("[");
-    for(size_t i = 0; i < size - 1; i++) {
-            printf("%u", arr[i]);
-            if(size - 2 != i) printf(",");
-    }
-    printf("]\n");
-}
-
-uint32_t average(uint32_t* arr, size_t size)
-{
-    uint64_t sum = 0;
-    for(int i = 0; i < size - 1; i++)
-        sum += arr[i];
-    return sum / size;
-}
-
 // Spectre Specific Code
 
 char* get_eviction_buffer()
 {
     static char* eviction_buffer = NULL;
     if (eviction_buffer == NULL) {
-        eviction_buffer = allocate_huge_page();
+        eviction_buffer = allocate_2mb_huge_page();
     }
     return eviction_buffer;
 }
@@ -83,13 +52,6 @@ void evict_all_cache()
     }
 }
 
-void create_eviction_set_graph()
-{
-    char* eviction_buffer = get_eviction_buffer();
-    assert(IS_ALIGNED(eviction_buffer, HUGE_PAGE_SIZE) && "Not huge page aligned.");
-
-}
-
 void assert_can_read_cycle_count()
 {
     uint64_t read_reg;
@@ -101,75 +63,92 @@ void assert_can_read_cycle_count()
     }
 }
 
-CacheStats record_cache_stats()
+uint64_t average(uint64_t* arr, size_t size)
+{
+    uint64_t sum = 0;
+    for(int i = 0; i < size - 1; i++)
+        sum += arr[i];
+    return sum / size;
+}
+
+CacheStats generate_cache_stats(size_t samples)
 {
     assert_can_read_cycle_count();
+    CacheStats retval = (CacheStats) {
+        .num_samples = samples,
+        .l1_samples = malloc(sizeof(uint64_t) * samples),
+        .l2_samples = malloc(sizeof(uint64_t) * samples),
+        .dram_samples = malloc(sizeof(uint64_t) * samples)
+    };
+
+    char* eviction_buffer = get_eviction_buffer();
+    char* line_buffer = malloc(64 * sizeof(char));
+
+    // l1 accesses
+    for(int i = 0; i < samples; i++)
+    {
+        line_buffer[0] = 'a';
+        retval.l1_samples[i] = time_access(line_buffer);
+    }
+    // l2 accesses
+    for(int i = 0; i < samples; i++)
+    {
+        line_buffer[0] = 'a';
+        for(int j = 0; j < L1_SIZE; j += 64) {
+            eviction_buffer[j] = 'a';
+        }
+        retval.l2_samples[i] = time_access(line_buffer);
+    }
+    // dram access
+    for(int i = 0; i < samples; i++)
+    {
+        evict_all_cache();
+        retval.dram_samples[i] = time_access(line_buffer);
+    }
+
+    retval.l1 = average(retval.l1_samples, samples);
+    retval.l2 = average(retval.l2_samples, samples);
+    retval.dram = average(retval.dram_samples, samples);
+
+    free(line_buffer);
+    return retval;
+}
+
+void destroy_cache_stats(CacheStats stats)
+{
+    free(stats.l1_samples);
+    free(stats.l2_samples);
+    free(stats.dram_samples);
+}
+
+void print_buffer(uint64_t* arr, size_t size) {
+    printf("[");
+    for(size_t i = 0; i < size - 1; i++) {
+            printf("%lu", arr[i]);
+            if(size - 2 != i) printf(",");
+    }
+    printf("]\n");
+}
+
+void print_cache_stats(CacheStats stats)
+{
     printf("L1 Size:%lu\n", L1_SIZE);
     printf("L2 Size:%lu\n", L2_SIZE);
 
-    uint32_t dram_samples[NUM_SAMPLES] = {},
-                l1_samples[NUM_SAMPLES] = {},
-                l2_samples[NUM_SAMPLES] = {};
-    size_t largest_cache_size = max(L1_SIZE, L2_SIZE);
-    char* eviction_buffer = malloc(2* largest_cache_size * sizeof(char));
-    char* line_buffer = malloc(16 * sizeof(char));
-
-    // dram access
-    for(int i = 0; i < NUM_SAMPLES; i++) {
-        //flush_address(line_buffer);
-        REPEAT(1) evict_all_cache();
-        //REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
-        dram_samples[i] = time_access(line_buffer);
-    }
-    // l1 accesses
-    for(int i = 0; i < NUM_SAMPLES; i++) {
-        //REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
-        line_buffer[0] = 'a';
-        l1_samples[i] = time_access(line_buffer);
-    }
-    // l2 accesses
-    for(int i = 0; i < NUM_SAMPLES; i++) {
-        line_buffer[0] = 'a';
-        REPEAT(10) for(int j=0; j<(2*L1_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
-        l2_samples[i] = time_access(line_buffer);
-    }
-    print_buffer(l1_samples, NUM_SAMPLES);
-    print_buffer(l2_samples, NUM_SAMPLES);
-    print_buffer(dram_samples, NUM_SAMPLES);
-
-    free(line_buffer);
-    free(eviction_buffer);
-    CacheStats stats = (CacheStats){
-        average(l1_samples, NUM_SAMPLES),
-        average(l2_samples, NUM_SAMPLES),
-        average(dram_samples, NUM_SAMPLES)
-    };
+    printf("L1 Samples: ");
+    print_buffer(stats.l1_samples, stats.num_samples);
+    printf("L2 Samples: ");
+    print_buffer(stats.l2_samples, stats.num_samples);
+    printf("DRAM Samples: ");
+    print_buffer(stats.dram_samples, stats.num_samples);
 
     printf("L1 Average: %u\n", stats.l1);
     printf("L2 Average: %u\n", stats.l2);
     printf("DRAM Average: %u\n", stats.dram);
-    return stats;
 }
 
-MemoryLevel determine_memory_level(CacheStats stats, void* address)
+void print_python_eviction_set_graph()
 {
-    uint32_t access_time = time_access(address);
-    //printf("Time to acces:%u\n", access_time);
-    uint32_t l1_diff = UNSIGNED_ABS_DIFF(access_time, stats.l1),
-                l2_diff = UNSIGNED_ABS_DIFF(access_time, stats.l2),
-                dram_diff = UNSIGNED_ABS_DIFF(access_time, stats.dram);
-    //printf("l1_diff:%u, l2_diff:%u, dram_diff:%u", l1_diff, l2_diff, dram_diff);
-    if(l1_diff < l2_diff && l1_diff < dram_diff) return L1;
-    else if(l2_diff < dram_diff) return L2;
-    else return DRAM;
-}
-
-void warmup()
-{
-    const size_t page_size = 1 << 12;
-    char* small_page = malloc(page_size * sizeof(char));
-    REPEAT(2000) for(int i = 0; i < page_size - 1; i++){
-            small_page[i] = small_page[i] * 7 + small_page[i] / 5;
-    }
-    free(small_page);
+    char* eviction_buffer = get_eviction_buffer();
+    // TODO: finish
 }
