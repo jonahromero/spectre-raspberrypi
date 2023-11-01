@@ -5,7 +5,7 @@
 #define UNSIGNED_ABS_DIFF(a, b) ((a) > (b) ? (a) - (b) : (b) - (a))
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define NUM_SAMPLES 900
-#define HUGE_PAGE_SIZE (1 << 20)
+#define HUGE_PAGE_SIZE (1 << 21)
 #define IS_ALIGNED(ptr, alignment) (((uint64_t)(ptr) & ((uint64_t)(alignment) - 1)) == 0)
 
 #define L1_SIZE (64*256*2)
@@ -16,7 +16,7 @@
 char* allocate_huge_page()
 {
     fflush(stdout);
-    void* buf = mmap(NULL, ( 1024 *0.25 * 1024), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED| MAP_HUGETLB, -1, 0);
+    void* buf = mmap(NULL, (2 * 1024 * 1024), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
 
     if (buf == (void*) - 1) {
         perror("mmap() error\n");
@@ -95,7 +95,7 @@ void assert_can_read_cycle_count()
     uint64_t read_reg;
     asm volatile("mrs %0, PMUSERENR_EL0":"=r"(read_reg));
     if (!(read_reg & 1) || !((read_reg >> 2) & 1)) {
-        fprintf(stderr, "Status:%#08x\n", read_reg);
+        fprintf(stderr, "Status Failed:%#08x\n", read_reg);
         fflush(stderr);
         exit(EXIT_FAILURE);
     }
@@ -114,6 +114,13 @@ CacheStats record_cache_stats()
     char* eviction_buffer = malloc(2* largest_cache_size * sizeof(char));
     char* line_buffer = malloc(16 * sizeof(char));
 
+    // dram access
+    for(int i = 0; i < NUM_SAMPLES; i++) {
+        //flush_address(line_buffer);
+        REPEAT(1) evict_all_cache();
+        //REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
+        dram_samples[i] = time_access(line_buffer);
+    }
     // l1 accesses
     for(int i = 0; i < NUM_SAMPLES; i++) {
         //REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
@@ -125,14 +132,6 @@ CacheStats record_cache_stats()
         line_buffer[0] = 'a';
         REPEAT(10) for(int j=0; j<(2*L1_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
         l2_samples[i] = time_access(line_buffer);
-    }
-    // dram access
-    for(int i = 0; i < NUM_SAMPLES; i++) {
-        //flush_address(line_buffer);
-        evict_all_cache();
-        __sync_synchronize();
-        //REPEAT(10) for(int j=0; j<(2*L2_SIZE)/16; j++) eviction_buffer[j*16] = 'a';
-        dram_samples[i] = time_access(line_buffer);
     }
     print_buffer(l1_samples, NUM_SAMPLES);
     print_buffer(l2_samples, NUM_SAMPLES);
