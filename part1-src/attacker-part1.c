@@ -55,7 +55,7 @@ int run_attacker(int kernel_fd, char *shared_memory)
             for (size_t i = 0; i < SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES; i++) 
             {
                 void* target_addr = shared_memory + i * SHD_SPECTRE_LAB_PAGE_SIZE;
-                evict_all_cache();
+                REPEAT(10) evict_all_cache();
                 call_kernel_part1(kernel_fd, shared_memory, current_offset);
                 uint64_t time = time_access(target_addr);
                 if (time <= cache_stats.l2 + 20 /*Plus some padding*/) {

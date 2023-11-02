@@ -7,6 +7,7 @@
 #define HUGE_PAGE_SIZE (1 << 21)
 #define L1_SIZE (64*256*2)
 #define L2_SIZE (64*1024*16)
+#define ALIGN_FORWARD(x, alignment) (void*)(((uint64_t)(x) + (alignment) - 1) & ~(alignment - 1))
 
 // Helper functions:
 
@@ -45,11 +46,36 @@ size_t get_eviction_buffer_size() { return HUGE_PAGE_SIZE; }
 
 void evict_all_cache()
 {
-    char* eviction_buffer = get_eviction_buffer();
-    for (size_t i = 0; i < get_eviction_buffer_size(); i += 64)
+#undef FANCY
+#ifdef FANCY
+    char* l2_cache = ALIGN_FORWARD(get_eviction_buffer(), L2_SIZE);
+    uint64_t N = 16, D = 11, A = 3;
+    for (uint64_t set = 0; set < 1024; set++)
     {
-        eviction_buffer[i] = 'a';
+        //forms an eviction set
+        for (uint64_t way = 0; way < N - D; way++)
+        {
+            REPEAT(A)
+            {
+                for (uint64_t k = 0; k < D; k++)
+                {
+                    volatile char* line = (void*)((uint64_t)l2_cache | ((way+k) << 16) | (set << 6));
+                    *line = 'a';
+                }
+            }
+        }
     }
+#else
+    char* l2_cache = ALIGN_FORWARD(get_eviction_buffer(), L2_SIZE);
+    for (uint64_t set = 0; set < 1024; set++)
+    {
+        for (uint64_t way = 0; way < 16; way++)
+        {
+            volatile char* line = (void*)((uint64_t)l2_cache | (way << 16) | (set << 6));
+            REPEAT(3) *line = 'a';
+        }
+    }
+#endif
 }
 
 void assert_can_read_cycle_count()
@@ -102,7 +128,7 @@ CacheStats generate_cache_stats(size_t samples)
     // dram access
     for(int i = 0; i < samples; i++)
     {
-        evict_all_cache();
+        REPEAT(2) evict_all_cache();
         retval.dram_samples[i] = time_access(line_buffer);
     }
 
