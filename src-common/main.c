@@ -20,7 +20,14 @@
  * main
  * Setup shared memory and launch student code.
  */
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
+    if (argc == 2) {
+        if (strcmp(argv[1], "--eviction-graph") == 0) {
+            print_python_eviction_set_graph();
+            return 0;
+        }
+    }
     char *shared_memory;
     int kernel_fd;
 

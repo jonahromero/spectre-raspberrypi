@@ -8,6 +8,7 @@
 #include "labspectreipc.h"
 #include <linux/kthread.h>
 #include <linux/sched.h>
+#include <linux/completion.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Joseph Ravichandran <jravi@csail.mit.edu>");
@@ -68,12 +69,32 @@ void enable_pm(void)
     printk("After Setting PMUSERENR_EL0:%#08x\n", user_enable);
 }
 
-int enable_pm_thread_wrapper(void*) { enable_pm(); return 0; }
-
-void enable_pm_on_core(int core)
+void enable_user_cache_maintenance(void)
 {
-    struct task_struct* task = kthread_create_on_cpu(enable_pm_thread_wrapper, &core, core, "enable_pm_thread");
+    uint64_t system_ctl_register;
+    uint64_t mask = ~(1UL << 26);
+    asm volatile("mrs %0, SCTLR_EL1" :"=r"(system_ctl_register));
+    // bit 26: 0 will trap to os, 1 won't trap
+    system_ctl_register &= mask;
+    asm volatile("msr SCTLR_EL1, %0" ::"r"(system_ctl_register));
+}
+
+static struct completion my_thread_completion;
+
+int enable_control_thread_wrapper(void*)
+{
+    enable_user_cache_maintenance();
+    enable_pm(); 
+    complete(&my_thread_completion);
+    return 0;
+}
+
+void enable_control_on_core(int core)
+{
+    init_completion(&my_thread_completion);
+    struct task_struct* task = kthread_create_on_cpu(enable_control_thread_wrapper, &core, core, "enable_control_thread");
     wake_up_process(task);
+    wait_for_completion(&my_thread_completion);
 }
 
 static int select_cache(size_t cache_level, int is_data_cache)
@@ -170,8 +191,11 @@ void print_cmd(spectre_lab_command *cmd) {
 int spectre_lab_init(void) {
     printk(SHD_PRINT_INFO "SHD Spectre KM Loaded\n");
     for (int i = 0; i < num_possible_cpus(); i++) {
-        enable_pm_on_core(i);
+        enable_control_on_core(i);
     }
+    int cpu = get_cpu();
+    printk(SHD_PRINT_INFO "On Core: %d\n", cpu);
+    put_cpu();
     print_cache_info();
     spectre_lab_procfs_victim = proc_create(SHD_PROCFS_NAME, 0, NULL, &spectre_lab_victim_ops);
     return 0;

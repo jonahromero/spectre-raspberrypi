@@ -24,6 +24,12 @@
 uint64_t time_access(void *addr);
 
 /*
+ * evict_address
+ * evicts an address to point of coherency
+*/
+void evict_address(void* addr);
+
+/*
  * init_shared_memory
  * Intializes a region of shared memory by writing to it,
  * and then flushing it from the cache. This should

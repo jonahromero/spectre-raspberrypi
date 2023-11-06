@@ -42,31 +42,15 @@ char* get_eviction_buffer()
     return eviction_buffer;
 }
 
+char* get_l2_buffer() {
+    return ALIGN_FORWARD(get_eviction_buffer(), L2_SIZE);
+}
+
 size_t get_eviction_buffer_size() { return HUGE_PAGE_SIZE; }
 
 void evict_all_cache()
 {
-#undef FANCY
-#ifdef FANCY
-    char* l2_cache = ALIGN_FORWARD(get_eviction_buffer(), L2_SIZE);
-    uint64_t N = 16, D = 11, A = 3;
-    for (uint64_t set = 0; set < 1024; set++)
-    {
-        //forms an eviction set
-        for (uint64_t way = 0; way < N - D; way++)
-        {
-            REPEAT(A)
-            {
-                for (uint64_t k = 0; k < D; k++)
-                {
-                    volatile char* line = (void*)((uint64_t)l2_cache | ((way+k) << 16) | (set << 6));
-                    *line = 'a';
-                }
-            }
-        }
-    }
-#else
-    char* l2_cache = ALIGN_FORWARD(get_eviction_buffer(), L2_SIZE);
+    char* l2_cache = get_l2_buffer();
     for (uint64_t set = 0; set < 1024; set++)
     {
         for (uint64_t way = 0; way < 16; way++)
@@ -75,7 +59,6 @@ void evict_all_cache()
             REPEAT(3) *line = 'a';
         }
     }
-#endif
 }
 
 void assert_can_read_cycle_count()
@@ -97,9 +80,15 @@ uint64_t average(uint64_t* arr, size_t size)
     return sum / size;
 }
 
+void evict_address(void* addr)
+{
+    asm volatile("dc civac, %0"::"r"(addr));
+}
+
 CacheStats generate_cache_stats(size_t samples)
 {
-    assert_can_read_cycle_count();
+    printf("Eviction Buffer: %p\n", get_eviction_buffer());
+    //assert_can_read_cycle_count();
     CacheStats retval = (CacheStats) {
         .num_samples = samples,
         .l1_samples = malloc(sizeof(uint64_t) * samples),
@@ -128,7 +117,7 @@ CacheStats generate_cache_stats(size_t samples)
     // dram access
     for(int i = 0; i < samples; i++)
     {
-        REPEAT(2) evict_all_cache();
+        REPEAT(6) evict_all_cache();
         retval.dram_samples[i] = time_access(line_buffer);
     }
 
@@ -175,6 +164,48 @@ void print_cache_stats(CacheStats stats)
 
 void print_python_eviction_set_graph()
 {
-    char* eviction_buffer = get_eviction_buffer();
-    // TODO: finish
+    char* target = malloc(4096);
+    char* l2_cache = get_l2_buffer();
+    const uint64_t NUMBER_OF_EVICTION_SETS = 1024;
+    const uint64_t TRIALS = 1000;
+    uint64_t results[1024] = {};
+    REPEAT(TRIALS)
+    for (uint64_t es = 0; es < NUMBER_OF_EVICTION_SETS; es++) {
+        evict_address(target);
+        asm volatile("dsb sy");
+        *target = 'a';
+        asm volatile("dsb sy");
+        for (uint64_t set = 0; set < es; set++)
+        {
+            for (uint64_t way = 0; way < 16; way++)
+            {
+                volatile char* line = (void*)((uint64_t)l2_cache | (way << 16) | (set << 6));
+                REPEAT(2) *line = 'a';
+            }
+        }
+        results[es] += time_access(target);
+    }
+    
+    printf("import matplotlib.pyplot as plt\n\n");
+    printf("data = [");
+    for (uint64_t es = 0; es < NUMBER_OF_EVICTION_SETS; es++) {
+        printf("[%d, %lu]", es, results[es] / TRIALS);
+        if (es != NUMBER_OF_EVICTION_SETS - 1) {
+            printf(",\n");
+        }
+    } 
+    printf("]\n\n");
+    printf("# Create a plot\n");
+    printf("x, y = zip(*data)\n\n");
+    printf("# Create a plot\n");
+    printf("plt.plot(x, y)  # 'o-' is for dotted line with circle markers\n\n");
+    printf("# Set the title and labels\n");
+    printf("plt.title('Data Plot')\n");
+    printf("plt.xlabel('Eviction Sets Used')\n");
+    printf("plt.ylabel('Latencies')\n\n");
+    printf("# Save the plot to a file\n");
+    printf("plt.savefig('plot.png')\n\n");
+    printf("# Show the plot if desired\n");
+    printf("# plt.show()\n");
+    free(target);
 }
